@@ -4,13 +4,13 @@
 #
 # Prerequisites:
 #    - SECURITY_SCAN_TOKEN secret: fine-grained PAT with Contents:Write on
-#     the central security-scans hub (see docs/central-repo-setup.md)
+#      the central security-scans hub (see docs/central-repo-setup.md)
 #
 # What this does:
-#    - On push/schedule/dispatch: runs Semgrep SAST, Semgrep SCA, Syft + Grype,
-#     Gitleaks secret scanning, and pushes findings to the central hub
-#    - On pull_request (same-repo branches): runs all scans and posts a severity
-#     summary comment on the PR (no central push)
+#    - On push to tracked branches / schedule / dispatch: runs Semgrep SAST,
+#      Semgrep SCA, Syft + Grype, Gitleaks, and pushes findings to the central hub
+#    - On any pull_request: runs all scans and posts a severity summary comment
+#      on the PR (no central push)
 
 name: Security Scan
 
@@ -19,10 +19,11 @@ on:
     branches:
       - main
       - master
-  pull_request:
-    branches:
-      - main
-      - master
+      - prod
+      - production
+      - release
+      - staging
+  pull_request: ~
   schedule:
     # Weekly Monday 02:00 UTC
     - cron: "0 2 * * 1"
@@ -70,10 +71,10 @@ jobs:
 
           # To exclude specific files, add a .semgrepignore file to the repo root.
           semgrep scan \
-             --config auto \
-             --json-output=semgrep-sast.json \
-             . 2>&1 \
-           || echo "::warning::Semgrep SAST exited with an error — check output above"
+            --config auto \
+            --json-output=semgrep-sast.json \
+            . 2>&1 \
+            || echo "::warning::Semgrep SAST exited with an error — check output above"
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
@@ -89,9 +90,9 @@ jobs:
           path: semgrep-sast.json
           retention-days: 7
 
-   # -------------------------------------------------------------------
-   # Semgrep SCA — dependency / supply-chain analysis
-   # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # Semgrep SCA — dependency / supply-chain analysis
+  # -------------------------------------------------------------------
   semgrep-sca:
     name: Semgrep SCA
     runs-on: ubuntu-latest
@@ -122,10 +123,10 @@ jobs:
           echo '{"results":[],"errors":[],"paths":{"scanned":[]}}' > semgrep-sca.json
 
           semgrep scan \
-             --config p/supply-chain \
-             --json-output=semgrep-sca.json \
-             . \
-           || true
+            --config p/supply-chain \
+            --json-output=semgrep-sca.json \
+            . \
+            || true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
@@ -141,9 +142,9 @@ jobs:
           path: semgrep-sca.json
           retention-days: 7
 
-   # -------------------------------------------------------------------
-   # Syft + Grype — SBOM generation and vulnerability scanning
-   # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # Syft + Grype — SBOM generation and vulnerability scanning
+  # -------------------------------------------------------------------
   sca:
     name: Syft + Grype
     runs-on: ubuntu-latest
@@ -161,9 +162,9 @@ jobs:
       - name: Generate SBOM
         run: |
           syft "${{ github.workspace }}" \
-             -o cyclonedx-json=sbom.cyclonedx.json \
-             --exclude '**/.github/workflows/security-scan.yml' \
-           || true
+            -o cyclonedx-json=sbom.cyclonedx.json \
+            --exclude '**/.github/workflows/security-scan.yml' \
+            || true
 
       - name: Report SBOM component count
         if: always()
@@ -176,8 +177,8 @@ jobs:
       - name: Run Grype vulnerability scan
         run: |
           grype sbom:sbom.cyclonedx.json \
-             -o json=grype-results.json \
-           || true
+            -o json=grype-results.json \
+            || true
 
       - name: Report Grype finding count
         if: always()
@@ -193,9 +194,9 @@ jobs:
             grype-results.json
           retention-days: 7
 
-   # -------------------------------------------------------------------
-   # Gitleaks — secret / credential scanning
-   # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # Gitleaks — secret / credential scanning
+  # -------------------------------------------------------------------
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
@@ -218,12 +219,12 @@ jobs:
       - name: Run Gitleaks
         run: |
           gitleaks detect \
-             --source "${{ github.workspace }}" \
-             --report-format json \
-             --report-path gitleaks-report.json \
-             --redact \
-             --no-banner \
-             --exit-code 0
+            --source "${{ github.workspace }}" \
+            --report-format json \
+            --report-path gitleaks-report.json \
+            --redact \
+            --no-banner \
+            --exit-code 0
 
       - name: Report secret finding count
         if: always()
@@ -237,9 +238,9 @@ jobs:
           path: gitleaks-report.json
           retention-days: 7
 
-   # -------------------------------------------------------------------
-   # Push findings to central hub — runs only on push/schedule/dispatch
-   # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # Push findings to central hub — runs only on push/schedule/dispatch
+  # -------------------------------------------------------------------
   push-to-central:
     name: Push findings to security-scans
     runs-on: ubuntu-latest
@@ -265,16 +266,16 @@ jobs:
       - name: Write metadata.json
         run: |
           cat > artifacts/metadata.json <<EOF
-           {
-             "repository": "${{ github.repository }}",
-             "repo_name": "${{ github.event.repository.name }}",
-             "branch": "${{ github.ref_name }}",
-             "commit_sha": "${{ github.sha }}",
-             "run_id": "${{ github.run_id }}",
-             "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-             "event": "${{ github.event_name }}"
-           }
+          {
+            "repository": "${{ github.repository }}",
+            "repo_name": "${{ github.event.repository.name }}",
+            "branch": "${{ github.ref_name }}",
+            "commit_sha": "${{ github.sha }}",
+            "run_id": "${{ github.run_id }}",
+            "run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "event": "${{ github.event_name }}"
+          }
           EOF
 
       - name: Checkout security-scans hub
@@ -283,6 +284,99 @@ jobs:
           repository: ${{ env.CENTRAL_REPO }}
           token: ${{ secrets.SECURITY_SCAN_TOKEN }}
           path: central-repo
+
+      - name: Generate consolidated SBOM report
+        run: |
+          node --input-type=module -e '
+            import fs from "fs";
+
+            const sbom = JSON.parse(fs.readFileSync("artifacts/sca/sbom.cyclonedx.json", "utf8"));
+            const grype = JSON.parse(fs.readFileSync("artifacts/sca/grype-results.json", "utf8"));
+
+            // Build a lookup: key = "name@version" → [{cve, severity, fixedIn}]
+            const vulnMap = {};
+            for (const m of (grype.matches || [])) {
+              const art = m.artifact || {};
+              const vuln = m.vulnerability || {};
+              const key = `${art.name || "unknown"}@${art.version || "unknown"}`;
+              let sev = (vuln.severity || "unknown").toUpperCase();
+              if (["NEGLIGIBLE","UNKNOWN"].includes(sev)) sev = "INFO";
+              if (!vulnMap[key]) vulnMap[key] = [];
+              vulnMap[key].push({
+                cve: vuln.id || "—",
+                severity: sev,
+                fixedIn: (vuln.fix?.versions || []).join(", ") || "no fix available"
+              });
+            }
+
+            // Enrich every SBOM component with vulnerability status
+            const components = (sbom.components || []).map(c => {
+              const key = `${c.name || "unknown"}@${c.version || "unknown"}`;
+              const vulns = vulnMap[key] || [];
+              const hasVuln = vulns.length > 0;
+              const maxSev = vulns.length > 0
+                ? vulns.map(v => v.severity).reduce((a, b) => {
+                    const order = {CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, INFO:1};
+                    return (order[a]||0) >= (order[b]||0) ? a : b;
+                  })
+                : "none";
+              return {
+                type: c.type || "unknown",
+                name: c.name || "unknown",
+                version: c.version || "unknown",
+                purl: c.purl || null,
+                licenses: (c.licenses || []).map(l =>
+                  l.license?.id || l.license?.name || "unknown"
+                ),
+                vulnerable: hasVuln,
+                maxSeverity: maxSev,
+                vulnerabilityCount: vulns.length,
+                vulnerabilities: vulns.sort((a, b) => {
+                  const order = {CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, INFO:1};
+                  return (order[b.severity]||0) - (order[a.severity]||0);
+                })
+              };
+            });
+
+            // Sort: vulnerable first, then by severity, then alphabetically
+            const sevOrder = {CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, INFO:1, none:0};
+            components.sort((a, b) => {
+              if (a.vulnerable && !b.vulnerable) return -1;
+              if (!a.vulnerable && b.vulnerable) return 1;
+              const sa = sevOrder[a.maxSeverity] || 0;
+              const sb = sevOrder[b.maxSeverity] || 0;
+              if (sb !== sa) return sb - sa;
+              return (a.name || "").localeCompare(b.name || "");
+            });
+
+            const summary = {
+              totalComponents: components.length,
+              vulnerableComponents: components.filter(c => c.vulnerable).length,
+              cleanComponents: components.filter(c => !c.vulnerable).length,
+              bySeverity: {
+                critical: components.filter(c => c.maxSeverity === "CRITICAL").length,
+                high:     components.filter(c => c.maxSeverity === "HIGH").length,
+                medium:   components.filter(c => c.maxSeverity === "MEDIUM").length,
+                low:      components.filter(c => c.maxSeverity === "LOW").length,
+                info:     components.filter(c => c.maxSeverity === "INFO").length,
+              },
+              byType: components.reduce((acc, c) => {
+                acc[c.type] = (acc[c.type] || 0) + 1;
+                return acc;
+              }, {})
+            };
+
+            const report = {
+              generated: new Date().toISOString(),
+              repository: "${{ github.repository }}",
+              commit: "${{ github.sha }}",
+              summary,
+              components
+            };
+
+            fs.writeFileSync("sbom-report.json", JSON.stringify(report, null, 2));
+            console.log(`SBOM report generated: ${components.length} components, ${summary.vulnerableComponents} vulnerable`);
+          '
 
       - name: Copy findings into hub structure
         run: |
@@ -298,14 +392,216 @@ jobs:
           cp artifacts/sca/grype-results.json           "$DEST/" 2>/dev/null || echo '{"matches":[]}' > "$DEST/grype-results.json"
           cp artifacts/sca/sbom.cyclonedx.json          "$DEST/" 2>/dev/null || echo '{"bomFormat":"CycloneDX","components":[]}' > "$DEST/sbom.cyclonedx.json"
           cp artifacts/gitleaks/gitleaks-report.json    "$DEST/" 2>/dev/null || echo '[]' > "$DEST/gitleaks-report.json"
+          cp sbom-report.json                           "$DEST/" 2>/dev/null || echo '{"components":[]}' > "$DEST/sbom-report.json"
           cp artifacts/metadata.json                    "$DEST/"
 
-      - name: Commit and push to hub
+      - name: Generate markdown reports
+        run: |
+          node -e '
+            const fs = require("fs");
+            const out = process.argv[1];
+            const load = p => { try { return JSON.parse(fs.readFileSync(p,"utf8")); } catch(e) { return null; } };
+            const meta = load("artifacts/metadata.json") || {};
+            const repo = meta.repo_name || "unknown";
+            const repoFullName = meta.repository || "unknown";
+            const commit = (meta.commit_sha || "").slice(0,8);
+            const branch = meta.branch || "";
+            const runUrl = meta.run_url || "";
+            const runId = meta.run_id || "";
+            const now = new Date().toISOString();
+            const dateStr = now.slice(0,10);
+            const semSast = load("artifacts/semgrep-sast/semgrep-sast.json");
+            const semSca  = load("artifacts/semgrep-sca/semgrep-sca.json");
+            const grype   = load("artifacts/sca/grype-results.json");
+            const gitleaks = load("artifacts/gitleaks/gitleaks-report.json");
+            const sbom    = load("artifacts/sca/sbom.cyclonedx.json");
+            const r = a => (a && a.results) || [];
+            const map = { ERROR:"HIGH", WARNING:"MEDIUM", INFO:"LOW" };
+            const cnt = arr => { const c={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0}; (r(arr)||[]).forEach(x=>{const s=map[x.extra?.severity]||"INFO";c[s]++}); return c; };
+            const sc=cnt(semSast), sc2=cnt(semSca);
+            const gm = grype?.matches || [];
+            const gl = Array.isArray(gitleaks) ? gitleaks : [];
+            const gc = {CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0};
+            gm.forEach(m=>{let s=(m.vulnerability?.severity||"unknown").toUpperCase(); if(s==="NEGLIGIBLE"||s==="UNKNOWN")s="INFO"; if(gc[s]!==undefined)gc[s]++;else gc.INFO++;});
+            const lc = {CRITICAL:0,HIGH:gl.length,MEDIUM:0,LOW:0,INFO:0};
+            const tot={}; ["CRITICAL","HIGH","MEDIUM","LOW"].forEach(k=>{tot[k]=(sc[k]||0)+(sc2[k]||0)+(gc[k]||0)+(lc[k]||0);});
+            const h=r => "| "+r; const mkd = p=>fs.mkdirSync(p,{recursive:true});
+            const base = out+"/reports/"+repo;
+            const runDir = base+"/"+dateStr+"/"+runId;
+            mkd(runDir);
+
+            // ---- Security report (rich format) ----
+            const icons = {CRITICAL:"🔴",HIGH:"🟠",MEDIUM:"🟡",LOW:"🔵",INFO:"⚪"};
+            const iconForTot = t => tot[t.CRITICAL>0?"CRITICAL":tot.HIGH>0?"HIGH":tot.MEDIUM>0?"MEDIUM":"LOW"]||"🟢";
+
+            const totalFindings = tot.CRITICAL+tot.HIGH+tot.MEDIUM+tot.LOW;
+
+            let sec = "# Security Scan — "+repo+"\n\n";
+            sec += "**Date**: "+dateStr+"  \n";
+            sec += "**Run**: "+(runUrl?"["+runId+"]("+runUrl+")":runId)+"  \n";
+            sec += "**Branch**: `"+branch+"`  \n";
+            sec += "**Commit**: `"+commit+"`  \n";
+            sec += "**Total findings**: "+totalFindings;
+            sec += " ("+tot.CRITICAL+" critical · "+tot.HIGH+" high · "+tot.MEDIUM+" medium · "+tot.LOW+" low)\n\n";
+            sec += "| Critical | High | Medium | Low | Info |\n|----------|------|--------|-----|------|\n| **"+tot.CRITICAL+"** | **"+tot.HIGH+"** | **"+tot.MEDIUM+"** | **"+tot.LOW+"** | "+(tot.INFO||0)+" |\n\n";
+            sec += "_Generated: "+dateStr+" "+now.slice(11,16)+" UTC_\n\n---\n";
+
+            // -- Semgrep SAST --
+            const sastResults = r(semSast) || [];
+            const sastFiles = new Set(sastResults.map(x=>x.path).filter(Boolean));
+            sec += "\n#### Semgrep SAST — "+sastResults.length+" findings\n\n";
+            if (sastFiles.size > 0) {
+              sec += "<details><summary>Files scanned ("+sastFiles.size+")</summary>\n\n```\n";
+              sec += Array.from(sastFiles).sort().join("\n");
+              sec += "\n```\n\n</details>\n\n";
+            }
+            if (sastResults.length > 0) {
+              sec += "| Severity | Rule | File | Line | Description |\n|----------|------|------|------|-------------|";
+              sastResults.forEach(x=>{
+                const sevMap = {ERROR:"🟠 HIGH",WARNING:"🟡 MEDIUM",INFO:"🔵 LOW"};
+                const sev = sevMap[x.extra?.severity]||"🔵 LOW";
+                const rule = x.check_id||"—";
+                const ruleParts = rule.split(".");
+                const shortRule = ruleParts[ruleParts.length-1];
+                const refUrl = x.extra?.metadata?.references?.[0]||"";
+                const ruleLink = refUrl?"[`"+shortRule+`"](`+refUrl+")":"`"+shortRule+"`";
+                const desc = (x.extra?.message||"").slice(0,150);
+                sec += h(sev+" | "+ruleLink+" | `"+(x.path||"")+"` | "+x.start?.line+" | "+desc);                
+              });
+            } else { sec += "_No findings._\n"; }
+            // Finding details for SAST
+            if (sastResults.length > 0) {
+              sec += "\n\n<details><summary>Finding details</summary>\n";
+              sastResults.forEach((x,i)=>{  
+                if (i>0) sec += "\n---\n";
+                const sevMap = {ERROR:"🟠 HIGH",WARNING:"🟡 MEDIUM",INFO:"🔵 LOW"};
+                const sev = sevMap[x.extra?.severity]||"🔵 LOW";
+                sec += "\n**"+sev+" `"+x.check_id+"`**\n\n";
+                sec += "📄 `"+(x.path||"")+"`  line "+(x.start?.line||"")+"\n\n";
+                sec += "> "+((x.extra?.message||"").replace(/\n/g," ")).slice(0,300)+"\n\n";
+                const cwes = Array.isArray(x.extra?.metadata?.cwe) ? x.extra.metadata.cwe : (typeof x.extra?.metadata?.cwe === "string" ? [x.extra.metadata.cwe] : []);
+                if (cwes.length>0) sec += "  **CWE**: ["+cwes.map(c=>"[`"+c+"`](https://cwe.mitre.org/data/definitions/"+c.replace("CWE-","")+".html)").join(", ")+"]\n\n";
+                const owasp = (x.extra?.metadata?.owasp||[]);
+                if (owasp.length>0) sec += "  **OWASP**: "+owasp.map(o=>"`"+o+"`").join(", ")+"\n\n";
+                if (x.lines) {
+                  sec += "```\n"+x.lines+"\n```\n\n";
+                }
+                const refs = (x.extra?.metadata?.references||[]).slice(0,3);
+                if (refs.length>0) sec += "**References**: "+refs.map(r=>"[link]("+r+")").join(" · ")+"\n";
+              });
+              sec += "\n</details>\n";
+            }
+
+            // -- Semgrep SCA --
+            const scaResults = r(semSca) || [];
+            const scaFiles = new Set(scaResults.map(x=>x.path).filter(Boolean));
+            sec += "\n#### Semgrep SCA — "+scaResults.length+" findings\n\n";
+            if (scaFiles.size > 0) {
+              sec += "<details><summary>Files scanned ("+scaFiles.size+")</summary>\n\n```\n";
+              sec += Array.from(scaFiles).sort().join("\n");
+              sec += "\n```\n\n</details>\n\n";
+            }
+            if (scaResults.length > 0) {
+              sec += "| Severity | Rule | Package | Version | Description |\n|----------|------|---------|---------|-------------|";
+              scaResults.forEach(x=>{
+                const sevMap = {ERROR:"🟠 HIGH",WARNING:"🟡 MEDIUM",INFO:"🔵 LOW"};
+                const sev = sevMap[x.extra?.severity]||"🔵 LOW";
+                const rule = (x.check_id||"").split(".").pop()||"—";
+                const desc = (x.extra?.message||"").slice(0,150);
+                sec += h(sev+" | `"+rule+"` | — | — | "+desc);
+              });
+            } else { sec += "_No findings._\n"; }
+
+            // -- Grype --
+            sec += "\n#### Grype — "+gm.length+" findings\n\n";
+            if (gm.length > 0) {
+              sec += "| Severity | CVE | Package | Installed | Fixed In | Type |\n|----------|-----|---------|-----------|----------|------|";
+              gm.forEach(m=>{
+                const v = m.vulnerability||{};
+                const a = m.artifact||{};
+                let sev = (v.severity||"unknown").toUpperCase();
+                const sevIcon = {CRITICAL:"🔴",HIGH:"🟠",MEDIUM:"🟡",LOW:"🔵",NEGLIGIBLE:"⚪",UNKNOWN:"⚪",MODERATE:"🟡"}[sev]||"⚪";
+                const sevLabel = sevIcon+" "+(sev==="MODERATE"?"MEDIUM":sev);
+                const cveId = v.id||"—";
+                const cveUrl = v.urls?.[0]||"https://nvd.nist.gov/vuln/detail/"+(v.id||"").replace(/_/g,"/");
+                const cveLink = "["+cveId+"](https://nvd.nist.gov/vuln/detail/"+cveId.replace(/_/g,"/")+")";
+                const fixedIn = (v.fix?.versions||[]).join(", ")||"—";
+                sec += h(sevLabel+" | "+cveLink+(v.url?" [link]("+v.url+")":"")+" | `"+(a.name||"")+"` | "+(a.version||"")+" | "+fixedIn+" | "+(a.type||"")+" |");
+              });
+              // Grype finding details
+              sec += "\n\n<details><summary>Vulnerability details</summary>\n";
+              gm.forEach((m,i)=>{  
+                if (i>0) sec += "\n---\n";
+                const v = m.vulnerability||{};
+                const a = m.artifact||{};
+                let sev = (v.severity||"unknown").toUpperCase();
+                const sevIcon = {CRITICAL:"🔴",HIGH:"🟠",MEDIUM:"🟡",LOW:"🔵",NEGLIGIBLE:"⚪",UNKNOWN:"⚪",MODERATE:"🟡"}[sev]||"⚪";
+                const sevLabel = sevIcon+" "+(sev==="MODERATE"?"MEDIUM":sev);
+                const cveId = v.id||"—";
+                sec += "\n**"+sevLabel+" ["+cveId+"](https://nvd.nist.gov/vuln/detail/"+cveId.replace(/_/g,"/")+")** — `"+(a.name||"")+"` "+(a.version||"")+"\n\n";
+                if (v.description) sec += "> "+v.description.slice(0,300)+"\n\n";
+                const fixVer = (v.fix?.versions||[]).join(", ");
+                if (fixVer) sec += "✅ **Fix available**: upgrade to `"+fixVer+"`\n\n";
+                else sec += "❌ **No fix available**\n\n";
+                const refs = (v.related_vulnerabilities||[]).concat(v.urls||[]).slice(0,3);
+                if (refs.length>0) sec += "**References**: "+refs.map(r=>"[link](https://nvd.nist.gov/vuln/detail/"+r.replace(/_/g,"/")+")").join(" · ")+"\n";
+              });
+              sec += "\n</details>\n";
+            } else { sec += "_No findings._\n"; }
+
+            // -- Gitleaks --
+            const glArray = Array.isArray(gitleaks)?gitleaks:[];
+            sec += "\n#### Gitleaks — "+glArray.length+" finding"+(glArray.length!==1?"s":"")+"\n\n";
+            if (glArray.length > 0) {
+              sec += "| Rule | File | Line | Commit | Description |\n|------|------|------|--------|-------------|";
+              glArray.forEach(g=>{
+                const sev = "🟠 HIGH";
+                const desc = g.Rule||g.Secret||"—";
+                sec += h(sev+" | `"+(g.File||"")+"` | "+(g.StartLine||"")+" | `"+((g.Commit||"").slice(0,8)||"")+"` | "+desc);
+              });
+              // Gitleaks finding details
+              sec += "\n\n<details><summary>Finding details</summary>\n";
+              glArray.forEach((g,i)=>{
+                if (i>0) sec += "\n---\n";
+                sec += "\n**🟠 HIGH `"+(g.Rule||g.Secret||"unknown")+"`** — "+(g.Rule||"").replace(/[-_]/g," ")+"\n\n";
+                sec += "📄 `"+(g.File||"")+"`  line "+(g.StartLine||"")+"\n\n";
+                if (g.Line) sec += "```\n"+g.Line+"\n```\n\n";
+                sec += "🔖 Commit `"+((g.Commit||"").slice(0,8)||"unknown")+"` by "+(g.Author||"")+" on "+(g.Date||"")+"\n";
+              });
+              sec += "\n</details>\n";
+            } else { sec += "_No findings._\n"; }
+
+            fs.writeFileSync(runDir+"/security.md", sec);
+            fs.writeFileSync(base+"/latest-security.md", sec);
+            // SBOM report
+            let sb = "# SBOM Report — "+repo+"\n\n";
+            sb += "| Field | Value |\n|-------|-------|";
+            sb += "\n| Repository | "+repoFullName+" |";
+            sb += "\n| Branch | "+branch+" |";
+            sb += "\n| Commit | `"+commit+"` |";
+            sb += "\n| Generated | "+now+" |";
+            sb += "\n| Report Type | sbom |";
+            sb += "\n\n---\n\n";
+            const comps = sbom?.components || [];
+            sb += "**"+comps.length+" total components**\n\n";
+            const vulnKeys = new Set(gm.map(m=>((m.artifact?.name||"")+"@"+(m.artifact?.version||"")).toLowerCase()));
+            sb += "| Component | Version | Type | Status |\n|-----------|---------|------|--------|";
+            comps.forEach(c=>{
+              const key=(c.name+"@"+c.version).toLowerCase();
+              const flag=vulnKeys.has(key)?"⚠️":"✅";
+              sb += h((c.name||"-")+" | "+(c.version||"-")+" | "+(c.type||"-")+" | "+flag+" |");
+            });
+            fs.writeFileSync(runDir+"/sbom.md", sb);
+            fs.writeFileSync(base+"/latest-sbom.md", sb);
+            console.log("Reports generated: "+runDir+"/security.md, "+runDir+"/sbom.md → "+base+"/latest-*");
+          ' -- central-repo
+
+      - name: Commit findings and reports to hub
         working-directory: central-repo
         run: |
           git config user.name   "security-scan-bot"
           git config user.email "security-scan-bot@users.noreply.github.com"
-          git add findings/
+          git add findings/ reports/
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
@@ -313,9 +609,9 @@ jobs:
             git push origin "${{ env.CENTRAL_BRANCH }}"
           fi
 
-   # -------------------------------------------------------------------
-   # PR annotation — posts severity summary on pull requests
-   # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # PR annotation — posts severity summary on pull requests
+  # -------------------------------------------------------------------
   pr-annotation:
     name: Annotate PR
     runs-on: ubuntu-latest
@@ -355,7 +651,7 @@ jobs:
               if (!fs.existsSync(filePath)) return { counts, findings };
               try {
                 const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                const semap = { ERROR: 'HIGH', WARNING: 'MEDIUM', INFO: 'LOW', WARNING: 'MEDIUM' };
+                const semap = { ERROR: 'HIGH', WARNING: 'MEDIUM', INFO: 'LOW' };
                 for (const r of (data.results || [])) {
                   const extra = r.extra || {};
                   const sev = semap[extra.severity] || 'INFO';
@@ -368,12 +664,12 @@ jobs:
                       file: trunc(r.path || '—', 60),
                       line: r.start?.line || '—',
                       msg:  trunc((extra.message || '').replace(/\|/g, '\\|').replace(/\n/g, ' '), 120),
-                     });
-                   }
-                 }
-               } catch(e) {}
+                    });
+                  }
+                }
+              } catch(e) {}
               return { counts, findings };
-             }
+            }
 
             function parseGrype(filePath) {
               const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
@@ -396,12 +692,12 @@ jobs:
                       pkg:     art.name || '—',
                       ver:     art.version || '—',
                       fixedIn: (fix.versions || []).join(', ') || 'no fix',
-                     });
-                   }
-                 }
-               } catch(e) {}
+                    });
+                  }
+                }
+              } catch(e) {}
               return { counts, findings };
-             }
+            }
 
             function parseGitleaks(filePath) {
               const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
@@ -418,23 +714,28 @@ jobs:
                     line:   f.StartLine || '—',
                     commit: (f.Commit || '').slice(0, 8) || '—',
                     desc:    (f.Description || '').replace(/\|/g, '\\|'),
-                   });
-                 }
-               } catch(e) {}
+                  });
+                }
+              } catch(e) {}
               return { counts, findings };
-             }
+            }
 
             const sast      = parseSemgrepJson('artifacts/semgrep-sast/semgrep-sast.json');
             const sca       = parseSemgrepJson('artifacts/semgrep-sca/semgrep-sca.json');
             const grype     = parseGrype('artifacts/sca/grype-results.json');
-            const gitleaks = parseGitleaks('artifacts/gitleaks/gitleaks-report.json');
+            const gitleaks  = parseGitleaks('artifacts/gitleaks/gitleaks-report.json');
+
+            // ── Full Grype matches for SBOM section ──
+            const grypeMatches = fs.existsSync('artifacts/sca/grype-results.json')
+              ? JSON.parse(fs.readFileSync('artifacts/sca/grype-results.json', 'utf8')).matches || []
+              : [];
 
             const total = {
               CRITICAL: sast.counts.CRITICAL + sca.counts.CRITICAL + grype.counts.CRITICAL + gitleaks.counts.CRITICAL,
               HIGH:     sast.counts.HIGH      + sca.counts.HIGH      + grype.counts.HIGH      + gitleaks.counts.HIGH,
               MEDIUM:   sast.counts.MEDIUM    + sca.counts.MEDIUM    + grype.counts.MEDIUM    + gitleaks.counts.MEDIUM,
               LOW:      sast.counts.LOW       + sca.counts.LOW       + grype.counts.LOW       + gitleaks.counts.LOW,
-             };
+            };
 
             const icon = total.CRITICAL > 0 ? '🔴' :
                          total.HIGH      > 0 ? '🟠' :
@@ -469,7 +770,7 @@ jobs:
               if (findings.length > MAX_PER_TOOL)
                 detailLines.push(`_…and ${findings.length - MAX_PER_TOOL} more — [view full run](${runUrl})_`);
               detailLines.push('');
-             }
+            }
 
             function addGitleaksDetail(findings) {
               if (!findings.length) return;
@@ -481,29 +782,98 @@ jobs:
               if (findings.length > MAX_PER_TOOL)
                 detailLines.push(`_…and ${findings.length - MAX_PER_TOOL} more — [view full run](${runUrl})_`);
               detailLines.push('');
-             }
+            }
 
             addSemgrepDetail('Semgrep SAST', sast.findings);
             addSemgrepDetail('Semgrep SCA',  sca.findings);
             addGrypeDetail(grype.findings);
             addGitleaksDetail(gitleaks.findings);
 
+            // ── SBOM dependency summary ──
+            let sbomSummary = '';
+            const sbomPath = 'artifacts/sca/sbom.cyclonedx.json';
+            if (fs.existsSync(sbomPath)) {
+              const sbom = JSON.parse(fs.readFileSync(sbomPath, 'utf8'));
+              const components = sbom.components || [];
+              const totalCount = components.length;
+
+              // Build a set of vulnerable component keys from grype
+              const vulnKeys = new Set();
+              for (const m of grypeMatches || []) {
+                const art = m.artifact || {};
+                vulnKeys.add(`${art.name}@${art.version}`);
+              }
+
+              // Get all grype matches for vuln details
+              const vulnByComponent = {};
+              for (const m of grypeMatches || []) {
+                const art = m.artifact || {};
+                const vuln = m.vulnerability || {};
+                const key = `${art.name}@${art.version}`;
+                if (!vulnByComponent[key]) vulnByComponent[key] = [];
+                vulnByComponent[key].push({
+                  id: vuln.id || '—',
+                  severity: vuln.severity || 'unknown'
+                });
+              }
+
+              const vulnComponentCount = Object.keys(vulnByComponent).length;
+              const cleanCount = totalCount - vulnComponentCount;
+
+              // List of all vulnerable packages with their CVEs
+              const vulnList = Object.entries(vulnByComponent)
+                .sort((a, b) => {
+                  const maxSev = (entries) => {
+                    const order = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
+                    return Math.max(...entries.map(e => order[e.severity?.toUpperCase()] || 0));
+                  };
+                  return maxSev(b[1]) - maxSev(a[1]);
+                })
+                .map(([pkg, vulns]) => {
+                  const ids = vulns.map(v => v.id).join(', ');
+                  return `| \`${pkg}\` | ${vulns.map(v => v.id).join(', ')} |`;
+                })
+                .join('\n');
+
+              // Full component list (abbreviated for PR comment)
+              const byType = {};
+              for (const c of components) {
+                byType[c.type || 'unknown'] = (byType[c.type || 'unknown'] || 0) + 1;
+              }
+              const typeSummary = Object.entries(byType)
+                .sort((a, b) => b[1] - a[1])
+                .map(([t, c]) => `${t}: ${c}`)
+                .join(', ');
+
+              sbomSummary = [
+                '### 📦 SBOM — Dependencies',
+                '',
+                `**${totalCount} components total** — ${vulnComponentCount} vulnerable, ${cleanCount} clean`,
+                '',
+                `By type: ${typeSummary}`, '',
+                ...(vulnList
+                  ? ['', '| Package | CVEs |', '|---------|------|', vulnList]
+                  : ['\n_No vulnerable dependencies detected_']),
+              ].join('\n');
+            }
+
             const body = [
-               `## ${icon} Security Scan Results`,
-               '',
-               '| Tool | Critical | High | Medium | Low |',
-               '|------|----------|------|--------|-----|',
+              `## ${icon} Security Scan Results`,
+              '',
+              '| Tool | Critical | High | Medium | Low |',
+              '|------|----------|------|--------|-----|',
               row('Semgrep SAST', sast.counts),
               row('Semgrep SCA',  sca.counts),
               row('Grype',        grype.counts),
               row('Gitleaks',     gitleaks.counts),
-               `| **Total** | **${total.CRITICAL}** | **${total.HIGH}** | **${total.MEDIUM}** | **${total.LOW}** |`,
-               '',
-               `[View full scan run](${runUrl})`,
-               '',
-               '> Findings are pushed to the central hub only when this PR merges.',
-               ...(detailLines.length ? ['', '### High & Critical Findings', '', ...detailLines] : []),
-             ].join('\n');
+              `| **Total** | **${total.CRITICAL}** | **${total.HIGH}** | **${total.MEDIUM}** | **${total.LOW}** |`,
+              '',
+              '[View full scan run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})',
+              '',
+              '> Findings and SBOM are pushed to the central hub only when this PR merges.',
+              ...(sbomSummary ? ['', sbomSummary] : []),
+              ...(detailLines.length ? ['', '### High & Critical Findings', '', ...detailLines] : []),
+            ].join('\n');
 
             github.rest.issues.createComment({
               owner: context.repo.owner,
